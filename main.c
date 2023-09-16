@@ -57,12 +57,12 @@ void printLineMatched(FILE *file, int match){
 
 }
 
-int main () {
+int main (int argc, char* argv[]) {
 
-   /* if (argc != 3) {
+    if (argc != 3) {
         printf("El formato correcto para utilizar el programa es: grep ¨'pattern1|pattern2|pattern3|...' archivo¨ \n");
         return 1;
-    }*/
+    }
 
     clock_t start_time, end_time; //tiempo
     double elapsed_time;
@@ -72,7 +72,7 @@ int main () {
     
     int i, status, regComp, start,newStart, j = 0, contador = 0;
     pid_t pid; //Variable para guardar el id de los procesos
-    //char *filename = argv[2]; //Se guarda el nombre del archivo
+    char *filename = argv[2]; //Se guarda el nombre del archivo
     long fileSize; //Variable para guardar el tamaño del archivo
     
     int lista[numProcesos]; //Se crea la cola 
@@ -81,14 +81,14 @@ int main () {
     int msqid = msgget(msqkey, IPC_CREAT | S_IRUSR | S_IWUSR); //Id para pasar los mensajes
 
     // Open the file
-    FILE *fp = fopen("prueba.txt", "rb"); //Se abre el archivo
+    FILE *fp = fopen(filename, "rb"); //Se abre el archivo
     if (fp == NULL) {
         printf("Error opening file\n");
         exit(1);
     }
 
     // Compile regex
-    regexEx = "help"; //Regex Expression
+    regexEx = argv[1]; //Regex Expression
     regComp = regcomp(&regex, regexEx, 0); 
     if (regComp) {
         printf("Error al compilar la expresión regular\n");
@@ -115,7 +115,6 @@ int main () {
         msgsnd(msqid, (void *)&msg, sizeof(msg), IPC_NOWAIT);
         printf("Message sent\n");
         while (1) {
-            sleep(1);
             msgrcv(msqid, &msg, sizeof(msg), 1, 0);
             //printf("Mensaje recibido\n");
             if (msg.flag == 1) {
@@ -133,14 +132,12 @@ int main () {
             } if (msg.flag == 2) {
                 int arrayPos = msg.arrayPP;
                 for(i = 0; i < arrayPos; i++) {
-                    printf("%d \n", msg.coincidences[i]);
                     printLineMatched(fp,msg.coincidences[i]);
                 } 
             }
         }
     } else { // el hijo
         while (1) {
-            sleep(1);
             msgrcv(msqid, &msg, MSGSZ, getpid(), 0);
             
             printf("PID DEL HIJO %ld\n",(long)getpid());
@@ -197,7 +194,7 @@ int main () {
             while (fgets(buffer,dataLenght, fp) != NULL) { 
                 if (regexec(&regex, buffer, 0, NULL, 0) == 0) {
                     // If expression match the line
-                    printf("Coincidencia en la línea del buffer %d \n", regexLine);
+                    //printf("Coincidencia en la línea del buffer %d \n", regexLine);
 
                     // Add the line regex coincidences from the buffer
                     msg.coincidences[arrayPos] = linesBefore + regexLine;
