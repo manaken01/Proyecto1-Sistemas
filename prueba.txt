@@ -12,14 +12,12 @@
 #include <unistd.h>
 
 #define BUFFER_SIZE 8192 //El tamaño del buffer
-#define numProcesos 5 //El número de los procesos
+#define numProcesos 1 //El número de los procesos
 
 #define MSGSZ 128
 struct message {
   long type;
-  int flag; //La posición 0 se encuentra el flag para saber si termino de leer o procesar, la posición 1 contendra la ultima posición del buffer
-  int newStartP;
-  int arrayPP;
+  char flags[MSGSZ]; //La posición 0 se encuentra el flag para saber si termino de leer o procesar, la posición 1 contendra la ultima posición del buffer
   int coincidences[]; 
 } msg;
 
@@ -57,12 +55,12 @@ void printLineMatched(FILE *file, int match){
 
 }
 
-int main () {
+int main (int argc, char* argv[]) {
 
-   /* if (argc != 3) {
+    if (argc != 3) {
         printf("El formato correcto para utilizar el programa es: grep ¨'pattern1|pattern2|pattern3|...' archivo¨ \n");
         return 1;
-    }*/
+    }
 
     clock_t start_time, end_time; //tiempo
     double elapsed_time;
@@ -72,7 +70,7 @@ int main () {
     
     int i, status, regComp, start,newStart, j = 0, contador = 0;
     pid_t pid; //Variable para guardar el id de los procesos
-    //char *filename = argv[2]; //Se guarda el nombre del archivo
+    char *filename = argv[2]; //Se guarda el nombre del archivo
     long fileSize; //Variable para guardar el tamaño del archivo
     
     int lista[numProcesos]; //Se crea la cola 
@@ -81,14 +79,14 @@ int main () {
     int msqid = msgget(msqkey, IPC_CREAT | S_IRUSR | S_IWUSR); //Id para pasar los mensajes
 
     // Open the file
-    FILE *fp = fopen("prueba.txt", "rb"); //Se abre el archivo
+    FILE *fp = fopen(filename, "rb"); //Se abre el archivo
     if (fp == NULL) {
         printf("Error opening file\n");
         exit(1);
     }
 
     // Compile regex
-    regexEx = "help"; //Regex Expression
+    regexEx = argv[1]; //Regex Expression
     regComp = regcomp(&regex, regexEx, 0); 
     if (regComp) {
         printf("Error al compilar la expresión regular\n");
@@ -110,28 +108,31 @@ int main () {
 
     if (pid != 0) { // el padre
         msg.type = lista[contador];
-        msg.newStartP = 0;
-        msg.flag = 0;
-        msgsnd(msqid, (void *)&msg, sizeof(msg), IPC_NOWAIT);
+        msg.flags[1] = 0;
+        msg.flags[0] = 0;
+        msgsnd(msqid, (void *)&msg, sizeof(msg.flags), IPC_NOWAIT);
         printf("Message sent\n");
         while (1) {
             sleep(1);
             msgrcv(msqid, &msg, sizeof(msg), 1, 0);
             //printf("Mensaje recibido\n");
-            if (msg.flag == 1) {
-                if (msg.newStartP < fileSize) {
+            if (msg.flags[0] == 1) {
+                if (msg.flags[1] < fileSize) {
                     contador++;
                     if (contador == numProcesos)
                         contador = 0;
                     msg.type = lista[contador];
+                    printf("NEWSTART PADRE %d \n", msg.flags[1]);
                     //printf("Siguiente hijo\n");
-                    msgsnd(msqid, (void *)&msg, sizeof(msg), IPC_NOWAIT);
+                    msgsnd(msqid, (void *)&msg, sizeof(msg.flags), IPC_NOWAIT);
                 } else {
-                    printf("There is no more lines to read\n");
+                    printf("There is no more lines to read");
 
                 }
-            } if (msg.flag == 2) {
-                int arrayPos = msg.arrayPP;
+            } if (msg.flags[0] == 2) {
+                printf("Se encontro las coincidencias\n");
+                int arrayPos = msg.flags[3];
+                printf("ARRAYPOS %d \n", arrayPos);
                 for(i = 0; i < arrayPos; i++) {
                     printf("%d \n", msg.coincidences[i]);
                     printLineMatched(fp,msg.coincidences[i]);
@@ -142,13 +143,12 @@ int main () {
         while (1) {
             sleep(1);
             msgrcv(msqid, &msg, MSGSZ, getpid(), 0);
-            
-            printf("PID DEL HIJO %ld\n",(long)getpid());
-            
+
             // Allocate memory for the buffer
             char *buffer = malloc(BUFFER_SIZE);
 
-            start = msg.newStartP;
+            start = msg.flags[1];
+            printf("Start %d\n",start);
             // With the start position calculate the lines before
             long linesBefore = calculateLinesBeforeStart(fp, start); //lines
             printf("lineb: %d\n", linesBefore);
@@ -162,19 +162,18 @@ int main () {
             if (bytesRead > 0) {
                 // Search lastNewLine from buffer
                 char *lastNewLine = strrchr(buffer, '\n');
-                //printf("bytesREad %d\n",bytesRead);
+                printf("bytesREad %d\n",bytesRead);
                 if (lastNewLine != NULL) {
                     // Data lenght untill last newline
                     dataLenght = lastNewLine - buffer + 1;
-                    //printf("dataLEnght %d\n",dataLenght);
+                    printf("dataLEnght %d\n",dataLenght);
                     // Send last position
-                    //printf("START 2  %d\n",start);
-                   // printf("DATA LENGT 3 %d\n",dataLenght);
+                    printf("START 2  %d\n",start);
+                    printf("DATA LENGT 3 %d\n",dataLenght);
                     newStart = start + dataLenght + 1; //Bytes
 
                     //Send messagge, end of read
                     printf("Donde debe leer bytes el proximo proceso %d: \n", newStart);
-                    msg.newStartP = newStart;
 
                 } else {
                     printf("No se encontró un salto de línea en los primeros %d bytes.\n", BUFFER_SIZE);
@@ -185,7 +184,9 @@ int main () {
             }
 
             msg.type = 1;
-            msg.flag = 1;
+            msg.flags[0] = 1;
+            msg.flags[1] = newStart;
+            printf("newStart %d\n",msg.flags[1]);
             msgsnd(msqid, (void *)&msg, sizeof(msg), IPC_NOWAIT); //Se vuelve a mandar la lista al padre
              //procesar con regex
             int regexLine = 1;
@@ -210,8 +211,9 @@ int main () {
             }
 
             //printf("Termine de procesar\n");
-            msg.flag = 2;
-            msg.arrayPP = arrayPos;
+            msg.flags[0] = 2;
+            printf("array pos %d\n", arrayPos);
+            msg.flags[3] = arrayPos;
             free(buffer);
             msgsnd(msqid, (void *)&msg, sizeof(msg), IPC_NOWAIT); //Se vuelve a mandar la lista al padre
         }
