@@ -14,13 +14,15 @@
 
 #define BUFFER_SIZE 8192 //El tamaño del buffer
 #define numProcesos 5 //El número de los procesos
-
+#define MAX_TOKENS 100
 #define MSGSZ 128
 struct message {
   long type;
   int flag; //La posición 0 se encuentra el flag para saber si termino de leer o procesar, la posición 1 contendra la ultima posición del buffer
   int newStartP;
   int activos[numProcesos];
+  int numTokens; // Número de tokens en el array
+  char tokens[50][150];
 } msg;
 
 long calculateLinesBeforeStart(FILE *file, int offset){
@@ -120,11 +122,12 @@ int main (int argc, char *argv[]) {
                     last = 1;
                 }
             } if (msg.flag == 2) {
-                /*int arrayPos = msg.arrayPP;
+                int arrayPos = msg.numTokens;
                 for(i = 0; i < arrayPos; i++) {
-                    printf("%d \n", msg.coincidences[i]);
-                    printLineMatched(fp,msg.coincidences[i]);
-                } */
+                    printf("%s \n", msg.tokens[i]);
+                    printf("\n");
+                    //printLineMatched(fp,msg.tokens[i]);
+                } 
             } if (last == 1) {
                 int exitCondition = 0;
                 for (int j = 0; j < numProcesos; j++) {
@@ -141,7 +144,7 @@ int main (int argc, char *argv[]) {
             int newStart = 0, start = 0;
             long linesBefore = 0,  totalLines = 0;
             
-            msgrcv(msqid, &msg, MSGSZ, getpid(), 0);
+            msgrcv(msqid, &msg, sizeof(msg), getpid(), 0);
             
             printf("PID DEL HIJO %ld\n",(long)getpid());
             
@@ -191,7 +194,7 @@ int main (int argc, char *argv[]) {
             msgsnd(msqid, (void *)&msg, sizeof(msg), IPC_NOWAIT); //Se vuelve a mandar la lista al padre
             
             //procesar con regex
-             
+            int contador2 = 0;
             int regexLine = 1;
             char *token = strtok(buffer,"\n");
             int totalregex = 0;
@@ -199,13 +202,15 @@ int main (int argc, char *argv[]) {
                 if (regexec(&regex, token, 0, NULL, 0) == 0) {
                     
                     // If expression match the line
-                    printf("Coincidencia en la línea del buffer %d \n", regexLine);
+                    //printf("Coincidencia en la línea del buffer %d \n", regexLine);
                     
                     // Add the line regex coincidences from the buffer
                     totalregex = linesBefore + regexLine;
-                    printf("Coincidencia en la línea %d \n",(totalregex));
-                    printf("Token: %s \n", token);
-                    
+                    //printf("Coincidencia en la línea %d \n",(totalregex));
+                    //printf("Token: %s \n", token);
+                    //strcat(token, "\n");
+                    strcpy(msg.tokens[contador2],token);
+                    contador2++;
                 }
                 token = strtok(NULL,"\n");
                 regexLine++;
@@ -218,6 +223,8 @@ int main (int argc, char *argv[]) {
             //printf("Termine de procesar\n");
             msg.flag = 2;
             msg.activos[i] = 1;
+            msg.numTokens = contador2;
+            int arrayPos = msg.numTokens;
             msgsnd(msqid, (void *)&msg, sizeof(msg), IPC_NOWAIT); //Se vuelve a mandar la lista al padre
             free(buffer);
         }
