@@ -1,5 +1,6 @@
 //Proyecto 1 de sistemas operativos 
 //Creado por Mariangeles Carranza y Anthony Jiménez-2023 
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <regex.h>
@@ -11,18 +12,19 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-
-#define BUFFER_SIZE 8192 //El tamaño del buffer
-#define numProcesos 5 //El número de los procesos
+#define BUFFER_SIZE 8192 // Buffer size
+#define numProcess 5 // Process number
 #define MAX_TOKENS 100
 #define MSGSZ 128
+
 struct message {
   long type;
-  int flag; //La posición 0 se encuentra el flag para saber si termino de leer o procesar, la posición 1 contendra la ultima posición del buffer
-  int newStartP;
-  int activos[numProcesos];
-  int numTokens; // Número de tokens en el array
-  char tokens[50][150];
+  int flag; // 1 when process finished the reading, 2 when the process finished to process the buffer 
+
+  int newStartP; // Variable to save the start of the next process
+  int activos[numProcess]; // Variable to know what process are working
+  int numTokens; // Number of tokens from array
+  char tokens[50][150]; // Matrix wherematched lines are saved
 } msg;
 
 long calculateLinesBeforeStart(FILE *file, int offset){
@@ -45,128 +47,132 @@ long calculateLinesBeforeStart(FILE *file, int offset){
 
 }
 
-int calculateLenght(FILE *fp){
+int calculateLenght(FILE *fp){ // Extract the file size
     int fileSize;
     fseek(fp, 0L, SEEK_END);
-    fileSize = ftell(fp); //Se extrae el tamaño del archivo
+    fileSize = ftell(fp); 
     fseek(fp, 0L, SEEK_SET);
     return fileSize;
 };
 
 int main (int argc, char *argv[]) {
 
+    // Validation of the format
     if (argc != 3) {
         printf("El formato correcto para utilizar el programa es: grep ¨'pattern1|pattern2|pattern3|...' archivo¨ \n");
         return 1;
     }
 
-    clock_t start_time, end_time; //tiempo
+    clock_t start_time, end_time; // Time
     double elapsed_time;
     char *regexEx;
     regex_t regex;
     int i, regComp, last = 0, contador = 0;
-    pid_t pid; //Variable para guardar el id de los procesos
-    char *filename = argv[2]; //Se guarda el nombre del archivo
-    long fileSize; //Variable para guardar el tamaño del archivo
+    pid_t pid; // Variable to save pid from process
+    char *filename = argv[2]; // Variable that saves the filename
+    long fileSize; // Variable to save file Size
     
-    int lista[numProcesos]; //Se crea la cola 
+    int lista[numProcess]; // Create the queue
 
-    key_t msqkey = 999; //Key de los mensajes
-    int msqid = msgget(msqkey, IPC_CREAT | S_IRUSR | S_IWUSR); //Id para pasar los mensajes
+    key_t msqkey = 999; // Messagges key
+    int msqid = msgget(msqkey, IPC_CREAT | S_IRUSR | S_IWUSR); // Id from messagges
 
     // Open the file
-    FILE *fp = fopen(filename, "rb"); //Se abre el archivo
+    FILE *fp = fopen(filename, "rb"); 
     if (fp == NULL) {
-        printf("Error opening file\n");
+        printf("Error al abrir el archivo \n");
         exit(1);
     }
-    fileSize = calculateLenght(fp);
+    fileSize = calculateLenght(fp); // Calculate file Size
     printf("fileSize %d: \n", fileSize);
 
     // Compile regex
     regexEx = argv[1]; //Regex Expression
     regComp = regcomp(&regex, regexEx, 0); 
     if (regComp) {
-        printf("Error al compilar la expresión regular\n");
+        printf("Error al compilar la expresión regular \n");
         exit(1);
     }
     
-    for(i = 0; i < numProcesos; i++) {
+    for(i = 0; i < numProcess; i++) {
       pid = fork();
       if (pid !=0)
         lista[i] = pid;
       
       if (pid == 0)
-        break; //Si es hijo se sale
+        break; // If its son it breaks
     }
 
     
-    if (pid != 0) { // el padre
-        msg.type = lista[contador];
+    if (pid != 0) { // Father
+        msg.type = lista[contador]; //Initialize first messagge
         msg.newStartP = 0;
         msg.flag = 0;
         msgsnd(msqid, (void *)&msg, sizeof(msg), IPC_NOWAIT);
-        printf("Message sent\n");
+
+        printf("Mensaje enviado \n");
         while (1) {
             msgrcv(msqid, &msg, sizeof(msg), 1, 0);
-            if (msg.flag == 1) {
+
+            if (msg.flag == 1) { //If end to read
                 if (msg.newStartP < fileSize) {
                     contador++;
-                    if (contador == numProcesos)
+                    if (contador == numProcess)
                         contador = 0;
                     msg.type = lista[contador];
-                    //printf("Siguiente hijo\n");
+
                     msgsnd(msqid, (void *)&msg, sizeof(msg), IPC_NOWAIT);
                 } else {
-                    printf("There is no more lines to read\n");
+                    printf("No hay más lineas que leer \n");
                     last = 1;
                 }
-            } if (msg.flag == 2) {
+
+            } if (msg.flag == 2) { //If end to process
                 int arrayPos = msg.numTokens;
                 for(i = 0; i < arrayPos; i++) {
                     printf("%s \n", msg.tokens[i]);
                     printf("\n");
-                    //printLineMatched(fp,msg.tokens[i]);
                 } 
-            } if (last == 1) {
+
+            } if (last == 1) { // Exit condition
                 int exitCondition = 0;
-                for (int j = 0; j < numProcesos; j++) {
+                for (int j = 0; j < numProcess; j++) {
                     if (msg.activos[j] == 0) {
                         exitCondition++;
                     }
                 }
-                if (exitCondition == numProcesos-1) 
+                if (exitCondition == numProcess-1) 
                     break;
             }
         }
-    } else { // el hijo
+    } else { // Son
         while (1) {
             int newStart = 0, start = 0;
             long linesBefore = 0,  totalLines = 0;
             
             msgrcv(msqid, &msg, sizeof(msg), getpid(), 0);
             
-            printf("PID DEL HIJO %ld\n",(long)getpid());
+            printf("PID del hijo: %ld\n",(long)getpid());
             
             // Allocate memory for the buffer
             char *buffer = malloc(BUFFER_SIZE);
 
-            start = msg.newStartP;
-            printf("Start %ld\n",start);
-            // With the start position calculate the lines before
+            start = msg.newStartP; // The start position for reading
+            printf("Bytes de start: %ld\n",start);
+            
             linesBefore = calculateLinesBeforeStart(fp, start); //lines
-            printf("lineb: %d\n", linesBefore);
-            
-            
-            fseek(fp, start, SEEK_SET);
 
-            long bytesRead = fread(buffer, 1, BUFFER_SIZE, fp);
+            fseek(fp, start, SEEK_SET); // Pointer to star position
+
+            long bytesRead = fread(buffer, 1, BUFFER_SIZE, fp); // Fill the buffer
             size_t dataLenght = 0;
             
             if (bytesRead > 0) {
+
                 // Search lastNewLine from buffer
                 char *lastNewLine = strrchr(buffer, '\n');
                 //printf("bytesREad %d\n",bytesRead);
+
                 if (lastNewLine != NULL) {
                     
                     dataLenght = lastNewLine - buffer + 1;
@@ -186,14 +192,13 @@ int main (int argc, char *argv[]) {
             }
             
             totalLines = calculateLinesBeforeStart(fp, newStart); // Total lines 
-            // Adjust position to the start, send by the father
-            
+
             msg.type = 1;
             msg.flag = 1;
             msg.activos[i] = 0;
             msgsnd(msqid, (void *)&msg, sizeof(msg), IPC_NOWAIT); //Se vuelve a mandar la lista al padre
             
-            //procesar con regex
+            //process buffer with regex
             int contador2 = 0;
             int regexLine = 1;
             char *token = strtok(buffer,"\n");
@@ -202,15 +207,9 @@ int main (int argc, char *argv[]) {
                 if (regexec(&regex, token, 0, NULL, 0) == 0) {
                     
                     // If expression match the line
-                    //printf("Coincidencia en la línea del buffer %d \n", regexLine);
-                    
-                    // Add the line regex coincidences from the buffer
-                    totalregex = linesBefore + regexLine;
-                    //printf("Coincidencia en la línea %d \n",(totalregex));
-                    //printf("Token: %s \n", token);
-                    //strcat(token, "\n");
                     strcpy(msg.tokens[contador2],token);
                     contador2++;
+
                 }
                 token = strtok(NULL,"\n");
                 regexLine++;
@@ -224,7 +223,7 @@ int main (int argc, char *argv[]) {
             msg.flag = 2;
             msg.activos[i] = 1;
             msg.numTokens = contador2;
-            int arrayPos = msg.numTokens;
+
             msgsnd(msqid, (void *)&msg, sizeof(msg), IPC_NOWAIT); //Se vuelve a mandar la lista al padre
             free(buffer);
         }
@@ -233,8 +232,10 @@ int main (int argc, char *argv[]) {
     msgctl(msqkey, IPC_RMID, NULL);
     fclose(fp);
     regfree(&regex);
+
     end_time = clock();
     elapsed_time = (double) (end_time - start_time) / CLOCKS_PER_SEC;
-    printf("Elapsed time: %f seconds\n", elapsed_time);
+
+    printf("Tiempo transcurrido: %f segundos \n", elapsed_time);
     return 0;
 }
